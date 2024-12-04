@@ -2,140 +2,153 @@ const std = @import("std");
 
 pub fn main() !void {
     const allocator = std.heap.page_allocator;
-    const expression = "exp(3,5^2)+3.14*pi*4*(x-6)";
+    const expression = "exp(3,5^2 * x)+3.14*pi*4*(x-6)";
     const tokens = try tokenizeExpression(allocator, expression);
     const rpn = try shuntingYardAlgorithm(allocator, tokens);
 
     std.debug.print("RPN: ", .{});
     for (rpn) |token| {
-        std.debug.print("{s} ", .{token.value});
+        std.debug.print("{s} ", .{try tagToStr(allocator, token)});
     }
     std.debug.print("\n", .{});
 }
 
-pub fn operandsPerOperator(operator: []const u8) usize {
-    if (operator.len == 1)
-        switch (operator) {
-            '+', '-', '*', '/' => return 2,
-            '^' => return 2,
-            else => @panic("Invalid RPN"),
-        };
+/// Returns the derivative of the given expression
+/// as an array of tokens in reverse polish notation.
+pub fn getDerivativeTokens(expression: []const u8) ![]Token {
+    const allocator = std.heap.page_allocator;
+    const tokens = try tokenizeExpression(allocator, expression);
+    const rpn = try shuntingYardAlgorithm(allocator, tokens);
+
+    var output = std.ArrayList(Token).init(allocator);
+    try derivate(&output, rpn);
+
+    return output.toOwnedSlice();
 }
 
-// pub fn leftBound(f: [][]const u8, operatorIndex: usize) usize {
-//     var operandsNeeded = operandsPerOperator(f[operatorIndex][0]);
-// }
-
-pub fn derivate(allocator: std.mem.Allocator, f: [][]const u8) [][]const u8 {
-    _ = allocator;
-    return @constCast(&[_][]const u8{f[1]});
+/// Calculates the derivative of the given expression at the given x value.
+pub fn calcDerivative(expression: []const u8, x: f64) !f64 {
+    const allocator = std.heap.page_allocator;
+    const tokens = try getDerivativeTokens(expression);
+    const result = try evaluateExpression(allocator, tokens, x);
+    return result;
 }
 
-test derivate {
-    const input: [][]const u8 = @constCast(&[_][]const u8{
-        "x",
-        "2",
-        "*",
-    });
-
-    try std.testing.expectEqualSlices([]const u8, &[_][]const u8{"2"}, derivate(std.testing.allocator, input));
+/// Calculates the derivative of the given expression at the given x value
+/// with the given precision. Maximum precision is 1e-50.
+pub fn calcDerivativePrecise(expression: []const u8, x: f64, precision: f64) !f64 {
+    _ = .{expression, x, precision};
+    //TODO: Implement    
 }
 
-const TokenType = union(enum) {
+pub fn tagToStr(allocator: std.mem.Allocator, token: Token) ![]const u8 {
+    switch (token) {
+        .Number => |number| {
+            switch (number) {
+                .integer => return try std.fmt.allocPrint(allocator, "{d}", .{number.integer}),
+                .decimal => return number.decimal,
+            }
+        },
+        .Variable => |variable| return variable.name,
+        .Function => |function| return @tagName(function),
+        .Operator => |operator| return @tagName(operator),
+        .Constants => |constants| return @tagName(constants),
+        .Parenthesis => return "Parenthesis",
+        .Null => return "Null",
+    }
+}
+
+const Token = union(enum) {
     Number: Number,
+    // This should only be reached in/after the derivation step
+    Null: void,
+    Constants: Constant,
     Variable: Variable,
     Function: Function,
     Operator: Operator,
-    Constants: Constants,
-    LeftParen: Paren,
-    RightParen: Paren,
+    Parenthesis: Parenthesis,
 };
 
-const Number = struct {
-    value: []const u8,
+const Number = union(enum) {
+    integer: i64,
+    decimal: []const u8,
 };
 
 const Variable = struct {
     name: []const u8,
 };
 
-const Function = struct {
-    name: []const u8,
+const Parenthesis = enum {
+    left,
+    right,
 };
 
-const Operator = struct {
-    kind: []const u8,
+const Function = enum {
+    sin,
+    cos,
+    tan,
+    asin,
+    acos,
+    atan,
+    sinh,
+    cosh,
+    tanh,
+    asinh,
+    acosh,
+    atanh,
+    ln,
+    exp,
+    sqrt,
+    neg,
+};
+
+const Operator = enum {
+    @"+",
+    @"-",
+    @"*",
+    @"/",
+    @"^",
+};
+
+const OperatorInfo = struct {
     precedence: u8,
     leftAssociative: bool,
 };
 
-const Constants = struct {
-    value: []const u8,
-};
+const operators = struct {
+    const @"+": OperatorInfo = .{ .precedence = 1, .leftAssociative = true };
+    const @"-": OperatorInfo = .{ .precedence = 1, .leftAssociative = true };
+    const @"*": OperatorInfo = .{ .precedence = 2, .leftAssociative = true };
+    const @"/": OperatorInfo = .{ .precedence = 2, .leftAssociative = true };
+    const @"^": OperatorInfo = .{ .precedence = 3, .leftAssociative = false };
 
-const Paren = struct {
-    left: bool,
-};
-
-const Token = struct {
-    type: TokenType,
-    value: []const u8,
-};
-
-const functions = [_]Function{
-    .{ .name = "sin" },
-    .{ .name = "cos" },
-    .{ .name = "tan" },
-    .{ .name = "asin" },
-    .{ .name = "acos" },
-    .{ .name = "atan" },
-    .{ .name = "sinh" },
-    .{ .name = "cosh" },
-    .{ .name = "tanh" },
-    .{ .name = "asinh" },
-    .{ .name = "acosh" },
-    .{ .name = "atanh" },
-    .{ .name = "ln" },
-    .{ .name = "exp" },
-    .{ .name = "sqrt" },
-    .{ .name = "abs" },
-    .{ .name = "neg" },
-    .{ .name = "ceil" },
-    .{ .name = "floor" },
-    .{ .name = "gamma" },
-    .{ .name = "lgamma" },
-};
-
-const operators = [_]Operator{
-    .{ .kind = "+", .precedence = 1, .leftAssociative = true },
-    .{ .kind = "-", .precedence = 1, .leftAssociative = true },
-    .{ .kind = "*", .precedence = 2, .leftAssociative = true },
-    .{ .kind = "/", .precedence = 2, .leftAssociative = true },
-    .{ .kind = "^", .precedence = 3, .leftAssociative = false },
-};
-
-const constants = [_]Constants{
-    .{ .value = "e" },
-    .{ .value = "pi" },
-    .{ .value = "phi" },
-};
-
-fn isFunction(name: []const u8) bool {
-    for (functions) |func| {
-        if (std.mem.eql(u8, func.name, name)) {
-            return true;
-        }
+    fn getOperatorInfo(op: Operator) OperatorInfo {
+        return switch (op) {
+            .@"+" => operators.@"+",
+            .@"-" => operators.@"-",
+            .@"*" => operators.@"*",
+            .@"/" => operators.@"/",
+            .@"^" => operators.@"^",
+        };
     }
-    return false;
+};
+
+const Constant = enum {
+    e,
+    pi,
+    phi,
+};
+
+pub fn getFunction(name: []const u8) ?Function {
+    return std.meta.stringToEnum(Function, name);
 }
 
-fn isConstant(name: []const u8) bool {
-    for (constants) |constant| {
-        if (std.mem.eql(u8, constant.value, name)) {
-            return true;
-        }
-    }
-    return false;
+pub fn getConstant(name: []const u8) ?Constant {
+    return std.meta.stringToEnum(Constant, name);
+}
+
+pub fn getOperator(name: []const u8) ?Operator {
+    return std.meta.stringToEnum(Operator, name);
 }
 
 fn tokenizeExpression(allocator: std.mem.Allocator, expression: []const u8) ![]Token {
@@ -160,17 +173,19 @@ fn tokenizeExpression(allocator: std.mem.Allocator, expression: []const u8) ![]T
                 }
 
                 var number = try allocator.alloc(u8, end - i);
-                defer allocator.free(number);
 
                 var j: usize = 0;
                 while (j < end - i) : (j += 1) {
                     number[j] = if (expression[i + j] == ',') '.' else expression[i + j];
                 }
 
-                try tokens.append(Token{
-                    .type = TokenType{ .Number = .{ .value = try allocator.dupe(u8, number) } },
-                    .value = try allocator.dupe(u8, number),
-                });
+                if (has_decimal) {
+                    try tokens.append(Token{ .Number = .{ .decimal = number } });
+                } else {
+                    try tokens.append(Token{ .Number = .{ .integer = try std.fmt.parseInt(i64, number, 10) } });
+                    allocator.free(number);
+                }
+
                 i = end;
             },
             'a'...'z', 'A'...'Z' => {
@@ -178,46 +193,36 @@ fn tokenizeExpression(allocator: std.mem.Allocator, expression: []const u8) ![]T
                 while (end < expression.len and std.ascii.isAlphabetic(expression[end])) : (end += 1) {}
                 const name = expression[i..end];
 
-                const token = if (isFunction(name))
-                    Token{ .type = TokenType{ .Function = .{ .name = name } }, .value = name }
-                else if (isConstant(name))
-                    Token{ .type = TokenType{ .Constants = .{ .value = name } }, .value = name }
+                const token = if (getFunction(name)) |function|
+                    Token{ .Function = function }
+                else if (getConstant(name)) |constant|
+                    Token{ .Constants = constant }
                 else
-                    Token{ .type = TokenType{ .Variable = .{ .name = name } }, .value = name };
+                    Token{ .Variable = .{ .name = name } };
 
                 try tokens.append(token);
                 i = end;
             },
             '(', ')' => {
                 try tokens.append(Token{
-                    .type = if (c == '(')
-                        TokenType{ .LeftParen = .{ .left = true } }
-                    else
-                        TokenType{ .RightParen = .{ .left = false } },
-                    .value = if (c == '(') "(" else ")",
+                    .Parenthesis = if (c == '(') Parenthesis.left else Parenthesis.right,
                 });
                 i += 1;
             },
-            else => {
-                const op_str = expression[i .. i + 1];
-                for (operators) |op| {
-                    if (std.mem.eql(u8, op.kind, op_str)) {
-                        try tokens.append(Token{
-                            .type = TokenType{ .Operator = op },
-                            .value = op_str,
-                        });
-                        break;
-                    }
-                }
+            '+', '-', '*', '/', '^' => {
+                try tokens.append(Token{
+                    .Operator = getOperator(expression[i .. i + 1]) orelse unreachable,
+                });
                 i += 1;
             },
+            else => return error.InvalidCharacter,
         }
     }
 
     return tokens.toOwnedSlice();
 }
 
-pub fn shuntingYardAlgorithm(allocator: std.mem.Allocator, expression: []const Token) ![]const Token {
+pub fn shuntingYardAlgorithm(allocator: std.mem.Allocator, expression: []const Token) ![]Token {
     if (expression.len == 0) return &[_]Token{};
 
     var output_queue = try std.ArrayList(Token).initCapacity(allocator, expression.len);
@@ -225,32 +230,37 @@ pub fn shuntingYardAlgorithm(allocator: std.mem.Allocator, expression: []const T
     defer operator_stack.deinit();
 
     for (expression) |token| {
-        switch (token.type) {
+        switch (token) {
             .Number, .Variable, .Constants => try output_queue.append(token),
-            .Function, .LeftParen => try operator_stack.append(token),
+            .Function => try operator_stack.append(token),
             .Operator => |current_op| {
                 while (operator_stack.items.len > 0) {
                     const top = operator_stack.items[operator_stack.items.len - 1];
-                    switch (top.type) {
+                    switch (top) {
                         .Operator => |stack_op| {
-                            if (stack_op.precedence < current_op.precedence or
-                                (stack_op.precedence == current_op.precedence and !current_op.leftAssociative)) break;
+                            const stack_op_info = operators.getOperatorInfo(stack_op);
+                            const current_op_info = operators.getOperatorInfo(current_op);
+                            if (stack_op_info.precedence < current_op_info.precedence or
+                                (stack_op_info.precedence == current_op_info.precedence and !current_op_info.leftAssociative)) break;
 
                             try output_queue.append(operator_stack.pop());
                         },
-                        .LeftParen => break,
                         else => break,
                     }
                 }
                 try operator_stack.append(token);
             },
-            .RightParen => {
+            .Parenthesis => |parenthesis| {
+                if (parenthesis == Parenthesis.left) {
+                    try operator_stack.append(token);
+                    continue;
+                }
                 var found_left_paren = false;
                 while (operator_stack.items.len > 0) {
                     const top = operator_stack.pop();
-                    if (top.type == .LeftParen) {
+                    if (top == .Parenthesis) {
                         found_left_paren = true;
-                        if (operator_stack.items.len > 0 and operator_stack.items[operator_stack.items.len - 1].type == .Function) {
+                        if (operator_stack.items.len > 0 and operator_stack.items[operator_stack.items.len - 1] == .Function) {
                             try output_queue.append(operator_stack.pop());
                         }
                         break;
@@ -259,16 +269,257 @@ pub fn shuntingYardAlgorithm(allocator: std.mem.Allocator, expression: []const T
                 }
                 if (!found_left_paren) return error.MismatchedParentheses;
             },
+            .Null => unreachable,
         }
     }
 
     while (operator_stack.items.len > 0) {
         const top = operator_stack.pop();
-        if (top.type == .LeftParen or top.type == .RightParen) {
+        if (top == .Parenthesis) {
             return error.MismatchedParentheses;
         }
         try output_queue.append(top);
     }
 
     return output_queue.toOwnedSlice();
+}
+
+pub fn evaluateExpression(allocator: std.mem.Allocator, tokens: []const Token, x: f64) !f64 {
+    var stack = std.ArrayList(f64).init(allocator);
+    defer stack.deinit();
+
+    for (tokens) |token| {
+        switch (token) {
+            .Number => |number| {
+                const value = switch (number) {
+                    .integer => |i| @as(f64, @floatFromInt(i)),
+                    .decimal => |d| try std.fmt.parseFloat(f64, d),
+                };
+                try stack.append(value);
+            },
+            .Variable => try stack.append(x),
+            .Constants => |constant| {
+                const value: f64 = switch (constant) {
+                    .e => std.math.e,
+                    .pi => std.math.pi,
+                    .phi => std.math.phi,
+                };
+                try stack.append(value);
+            },
+            .Function => |function| {
+                if (stack.items.len < 1) return error.InvalidExpression;
+                const arg = stack.pop();
+                const result = switch (function) {
+                    .sin => @sin(arg),
+                    .cos => @cos(arg),
+                    .tan => @tan(arg),
+                    .asin => std.math.asin(arg),
+                    .acos => std.math.acos(arg),
+                    .atan => std.math.atan(arg),
+                    .sinh => std.math.sinh(arg),
+                    .cosh => std.math.cosh(arg),
+                    .tanh => std.math.tanh(arg),
+                    .asinh => std.math.asinh(arg),
+                    .acosh => std.math.acosh(arg),
+                    .atanh => std.math.atanh(arg),
+                    .ln => @log(arg),
+                    .exp => @exp(arg),
+                    .sqrt => @sqrt(arg),
+                    .neg => -arg,
+                };
+                try stack.append(result);
+            },
+            .Operator => |operator| {
+                if (stack.items.len < 2) return error.InvalidExpression;
+                const b = stack.pop();
+                const a = stack.pop();
+                const result = switch (operator) {
+                    .@"+" => a + b,
+                    .@"-" => a - b,
+                    .@"*" => a * b,
+                    .@"/" => a / b,
+                    .@"^" => std.math.pow(f64, a, b),
+                };
+                try stack.append(result);
+            },
+            .Parenthesis => return error.UnexpectedToken,
+            .Null => return error.UnexpectedToken,
+        }
+    }
+
+    if (stack.items.len != 1) return error.InvalidExpression;
+    return stack.items[0];
+}
+
+const Range = struct {
+    start: usize,
+    end: usize,
+};
+
+pub fn getLeftMostOperand(f: []Token) usize {
+    var needed: usize = 1;
+    var i: usize = f.len - 1;
+    while (needed > 0) : ({
+        needed -= 1;
+        i -= 1;
+    }) {
+        switch (f[i]) {
+            .Number, .Null, .Variable, .Constants => {},
+            .Function => needed += 1,
+            .Operator => needed += 2,
+            .Parenthesis => unreachable,
+        }
+    }
+    return i + 1;
+}
+
+pub fn derivate(output: *std.ArrayList(Token), f: []Token) !void {
+    switch (f[f.len - 1]) {
+        .Number => try output.append(Token{ .Null = {} }),
+        .Null => unreachable,
+        .Constants => try output.append(Token{ .Null = {} }),
+        .Variable => try output.append(Token{ .Number = .{ .integer = 1 } }),
+        .Function => |function| {
+            switch (function) {
+                .neg => {
+                    try derivate(output, f[0 .. f.len - 1]);
+                    try output.append(Token{ .Function = .neg });
+                },
+                else => @panic("Not implemented"),
+            }
+        },
+        .Operator => |operator| {
+            const pivot = getLeftMostOperand(f[0 .. f.len - 1]);
+            const u = f[0..pivot];
+            const v = f[pivot .. f.len - 1];
+            var changed: u2 = 0;
+            switch (operator) {
+                .@"+" => {
+                    try derivate(output, u);
+                    if (output.items[output.items.len - 1] == .Null) {
+                        _ = output.pop();
+                    } else changed += 1;
+
+                    try derivate(output, v);
+                    if (output.items[output.items.len - 1] == .Null) {
+                        _ = output.pop();
+                    } else changed += 1;
+
+                    if (changed == 2) try output.append(Token{ .Operator = .@"+" });
+                    if (changed == 0) try output.append(Token{ .Null = {} });
+                },
+                .@"-" => {
+                    try derivate(output, u);
+                    if (output.items[output.items.len - 1] == .Null) {
+                        _ = output.pop();
+                    } else changed += 1;
+
+                    try derivate(output, v);
+                    if (output.items[output.items.len - 1] == .Null) {
+                        _ = output.pop();
+                    } else {
+                        if (changed == 0) try output.append(Token{ .Function = .neg });
+                        changed += 1;
+                    }
+
+                    if (changed == 2) try output.append(Token{ .Operator = .@"-" });
+                    if (changed == 0) try output.append(Token{ .Null = {} });
+                },
+                .@"*" => {
+                    try derivate(output, u);
+                    if (output.items[output.items.len - 1] == .Null) {
+                        _ = output.pop();
+                    } else {
+                        try output.appendSlice(v);
+                        try output.append(Token{ .Operator = .@"*" });
+                        changed += 1;
+                    }
+
+                    try derivate(output, v);
+                    if (output.items[output.items.len - 1] == .Null) {
+                        _ = output.pop();
+                    } else {
+                        try output.appendSlice(u);
+                        try output.append(Token{ .Operator = .@"*" });
+                        changed += 1;
+                    }
+
+                    if (changed == 2) try output.append(Token{ .Operator = .@"+" });
+                    if (changed == 0) try output.append(Token{ .Null = {} });
+                },
+                .@"/" => {
+                    try derivate(output, u);
+                    if (output.items[output.items.len - 1] == .Null) {
+                        _ = output.pop();
+                    } else {
+                        try output.appendSlice(v);
+                        try output.append(Token{ .Operator = .@"*" });
+                        changed += 1;
+                    }
+
+                    try derivate(output, v);
+                    if (output.items[output.items.len - 1] == .Null) {
+                        _ = output.pop();
+                    } else {
+                        try output.appendSlice(u);
+                        try output.append(Token{ .Operator = .@"*" });
+                        if (changed == 0) try output.append(Token{ .Function = .neg });
+                        changed += 1;
+                    }
+
+                    if (changed == 2) try output.append(Token{ .Operator = .@"-" });
+                    if (changed == 0) try output.append(Token{ .Null = {} });
+
+                    try output.appendSlice(v);
+                    try output.appendSlice(&[_]Token{ Token{ .Operator = .@"^" }, Token{ .Number = .{ .integer = 2 } }, Token{ .Operator = .@"/" } });
+                },
+                .@"^" => {
+                    // u * v
+                    try output.appendSlice(u);
+                    try output.appendSlice(v);
+                    try output.append(Token{ .Operator = .@"*" });
+
+                    // v' ln (u)
+                    try derivate(output, v);
+                    if (output.items[output.items.len - 1] == .Null) {
+                        _ = output.pop();
+                    } else {
+                        try output.appendSlice(u);
+                        try output.append(Token{ .Function = .ln });
+                        try output.append(Token{ .Operator = .@"*" });
+                        changed += 1;
+                    }
+
+                    // u' * v / u
+                    try derivate(output, u);
+                    if (output.items[output.items.len - 1] == .Null) {
+                        _ = output.pop();
+                    } else {
+                        try output.appendSlice(v);
+                        try output.append(Token{ .Operator = .@"*" });
+                        try output.appendSlice(u);
+                        try output.append(Token{ .Operator = .@"/" });
+                        changed += 1;
+                    }
+                },
+            }
+        },
+        else => {},
+    }
+}
+
+test derivate {
+    const allocator = std.heap.page_allocator;
+    const expression = "3,5+2*x+3.14*pi*4*(x-6)";
+    const output = try getDerivativeTokens(expression);
+
+    std.debug.print("RPN Derivative: ", .{});
+    for (output) |token| {
+        std.debug.print("{s} ", .{try tagToStr(allocator, token)});
+    }
+    std.debug.print("\n", .{});
+
+    const x = 3.0;
+    const result = try calcDerivative(expression, x);
+    std.debug.print("Result: {d}\n", .{result});
 }
