@@ -15,10 +15,11 @@ pub fn main() !void {
 
 /// Returns the derivative of the given expression
 /// as an array of tokens in reverse polish notation.
-pub fn getDerivativeTokens(expression: []const u8) ![]Token {
-    const allocator = std.heap.page_allocator;
+pub fn getDerivativeTokens(allocator: std.mem.Allocator, expression: []const u8) ![]Token {
     const tokens = try tokenizeExpression(allocator, expression);
+    defer allocator.free(tokens);
     const rpn = try shuntingYardAlgorithm(allocator, tokens);
+    defer allocator.free(rpn);
 
     var output = std.ArrayList(Token).init(allocator);
     try derivate(&output, rpn);
@@ -27,18 +28,18 @@ pub fn getDerivativeTokens(expression: []const u8) ![]Token {
 }
 
 /// Calculates the derivative of the given expression at the given x value.
-pub fn calcDerivative(expression: []const u8, x: f64) !f64 {
-    const allocator = std.heap.page_allocator;
-    const tokens = try getDerivativeTokens(expression);
+pub fn calcDerivative(allocator: std.mem.Allocator, expression: []const u8, x: f64) !f64 {
+    const tokens = try getDerivativeTokens(allocator, expression);
+    defer allocator.free(tokens);
     const result = try evaluateExpression(allocator, tokens, x);
     return result;
 }
 
 /// Calculates the derivative of the given expression at the given x value
-/// with the given precision. Maximum precision is 1e-50.
-pub fn calcDerivativePrecise(expression: []const u8, x: f64, precision: f64) !f64 {
-    _ = .{expression, x, precision};
-    //TODO: Implement    
+/// with the given precision. Maximum precision is 1e-24(80 bits mantissa).
+pub fn calcDerivativePrecise(expression: []const u8, x: f128, precision: f128) !f128 {
+    _ = .{ expression, x, precision };
+    //TODO: Implement
 }
 
 pub fn tagToStr(allocator: std.mem.Allocator, token: Token) ![]const u8 {
@@ -471,14 +472,9 @@ pub fn derivate(output: *std.ArrayList(Token), f: []Token) !void {
                     if (changed == 0) try output.append(Token{ .Null = {} });
 
                     try output.appendSlice(v);
-                    try output.appendSlice(&[_]Token{ Token{ .Operator = .@"^" }, Token{ .Number = .{ .integer = 2 } }, Token{ .Operator = .@"/" } });
+                    try output.appendSlice(&[_]Token{ .{ .Operator = .@"^" }, .{ .Number = .{ .integer = 2 } }, .{ .Operator = .@"/" } });
                 },
                 .@"^" => {
-                    // u * v
-                    try output.appendSlice(u);
-                    try output.appendSlice(v);
-                    try output.append(Token{ .Operator = .@"*" });
-
                     // v' ln (u)
                     try derivate(output, v);
                     if (output.items[output.items.len - 1] == .Null) {
@@ -501,6 +497,14 @@ pub fn derivate(output: *std.ArrayList(Token), f: []Token) !void {
                         try output.append(Token{ .Operator = .@"/" });
                         changed += 1;
                     }
+
+                    if (changed == 2) try output.append(Token{ .Operator = .@"+" });
+                    if (changed == 0) try output.append(Token{ .Null = {} }) else {
+                        // u * v
+                        try output.appendSlice(u);
+                        try output.appendSlice(v);
+                        try output.appendSlice(&[_]Token{ Token{ .Operator = .@"*" }, Token{ .Operator = .@"*" } });
+                    }
                 },
             }
         },
@@ -509,17 +513,18 @@ pub fn derivate(output: *std.ArrayList(Token), f: []Token) !void {
 }
 
 test derivate {
-    const allocator = std.heap.page_allocator;
-    const expression = "3,5+2*x+3.14*pi*4*(x-6)";
-    const output = try getDerivativeTokens(expression);
+    const allocator = std.testing.allocator;
+    const expression = "2 ^ x";
+    const output = try getDerivativeTokens(allocator, expression);
+    defer allocator.free(output);
 
     std.debug.print("RPN Derivative: ", .{});
     for (output) |token| {
-        std.debug.print("{s} ", .{try tagToStr(allocator, token)});
+        std.debug.print("{s} ", .{try tagToStr(std.heap.page_allocator, token)});
     }
     std.debug.print("\n", .{});
 
     const x = 3.0;
-    const result = try calcDerivative(expression, x);
+    const result = try calcDerivative(allocator, expression, x);
     std.debug.print("Result: {d}\n", .{result});
 }
