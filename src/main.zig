@@ -101,6 +101,7 @@ const Function = enum {
     exp,
     sqrt,
     neg,
+    sec,
 };
 
 const Operator = enum {
@@ -327,6 +328,7 @@ pub fn evaluateExpression(allocator: std.mem.Allocator, tokens: []const Token, x
                     .exp => @exp(arg),
                     .sqrt => @sqrt(arg),
                     .neg => -arg,
+                    .sec => 1 / @cos(x),
                 };
                 try stack.append(result);
             },
@@ -381,10 +383,55 @@ pub fn derivate(output: *std.ArrayList(Token), f: []Token) !void {
         .Constants => try output.append(Token{ .Null = {} }),
         .Variable => try output.append(Token{ .Number = .{ .integer = 1 } }),
         .Function => |function| {
+            const u = f[0 .. f.len - 1];
             switch (function) {
                 .neg => {
-                    try derivate(output, f[0 .. f.len - 1]);
+                    try derivate(output, u);
                     try output.append(Token{ .Function = .neg });
+                },
+                .ln => {
+                    try derivate(output, u);
+                    if (output.getLast() != .Null) {
+                        try output.appendSlice(u);
+                        try output.append(Token{ .Operator = .@"/" });
+                    }
+                },
+                .exp => {
+                    try derivate(output, u);
+                    if (output.getLast() != .Null) {
+                        try output.appendSlice(u);
+                        try output.appendSlice(&[_]Token{ .{ .Function = .exp }, .{ .Operator = .@"*" } });
+                    }
+                },
+                .sin => {
+                    try derivate(output, u);
+                    if (output.getLast() != .Null) {
+                        try output.appendSlice(u);
+                        try output.appendSlice(&[_]Token{ .{ .Function = .cos }, .{ .Operator = .@"*" } });
+                    }
+                },
+                .cos => {
+                    try derivate(output, u);
+                    if (output.getLast() != .Null) {
+                        try output.append(Token{ .Function = .neg });
+                        try output.appendSlice(u);
+                        try output.appendSlice(&[_]Token{ .{ .Function = .sin }, .{ .Operator = .@"*" } });
+                    }
+                },
+                .tan => {
+                    try derivate(output, u);
+                    if (output.getLast() != .Null) {
+                        try output.appendSlice(u);
+                        try output.appendSlice(&[_]Token{ .{ .Function = .sec }, .{ .Number = .{ .integer = 2 } }, .{ .Operator = .@"^" }, .{ .Operator = .@"*" } });
+                    }
+                },
+                .asin => {
+                    try derivate(output, u);
+                    if (output.getLast() != .Null) {
+                        try output.append(Token{ .Number = .{ .integer = 1 } });
+                        try output.appendSlice(u);
+                        try output.appendSlice(&[_]Token{ .{ .Number = .{ .integer = 2 } }, .{ .Operator = .@"^" }, .{ .Operator = .@"-" }, .{ .Function = .sqrt }, .{ .Operator = .@"/" } });
+                    }
                 },
                 else => @panic("Not implemented"),
             }
@@ -514,7 +561,7 @@ pub fn derivate(output: *std.ArrayList(Token), f: []Token) !void {
 
 test derivate {
     const allocator = std.testing.allocator;
-    const expression = "2 ^ x";
+    const expression = "asin(5 * x)";
     const output = try getDerivativeTokens(allocator, expression);
     defer allocator.free(output);
 
@@ -524,7 +571,7 @@ test derivate {
     }
     std.debug.print("\n", .{});
 
-    const x = 3.0;
+    const x = 0.0;
     const result = try calcDerivative(allocator, expression, x);
     std.debug.print("Result: {d}\n", .{result});
 }
